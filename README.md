@@ -14,7 +14,7 @@ All components run locally using Docker containers.
 | **Kafka UI** | Web UI to inspect topics and messages | 8085 |
 | **Spark Master** | Spark master node for distributed processing | 8080 |
 | **Spark Worker** | Spark worker node | 8081 |
-| **Neo4j** | Graph database for entity and relationship storage | 7474 (HTTP), 7687 (Bolt) |
+| **Neo4j** | Graph database for entity and relationship storage | 7475 (HTTP), 7688 (Bolt) |
 
 ---
 
@@ -64,7 +64,7 @@ This will remove the raw and enriched NLP entity topics from Kafka.
 |----------|-----|---------------------|
 | **Kafka UI** | `http://localhost:8085` | N/A |
 | **Spark Master UI** | `http://localhost:8080` | N/A |
-| **Neo4j Browser** | `http://localhost:7474` | Username: neo4j Password: testpassword |
+| **Neo4j Browser** | `http://localhost:7475` | Username: neo4j Password: testpassword |
 ---
 
 
