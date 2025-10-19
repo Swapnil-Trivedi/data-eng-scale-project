@@ -33,7 +33,7 @@ cd des-project
 
 ### Make script executable
 ```bash
-chmod +x init_des.sh setup_kafka_topics.sh purge_kafka_topics.sh
+chmod +x init_des.sh scripts/setup_kafka_topics.sh scripts/purge_kafka_topics.sh
 ```
 
 ### Start full environment
