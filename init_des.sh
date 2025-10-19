@@ -25,7 +25,8 @@ echo ""
 echo "Checking Kafka readiness..."
 MAX_RETRIES=20
 for i in $(seq 1 $MAX_RETRIES); do
-  if docker exec des_kafka kafka-topics --bootstrap-server localhost:9092 --list >/dev/null 2>&1; then
+  # Use internal Docker hostname here, since 'localhost' inside container won't work
+  if docker exec des_kafka kafka-topics --bootstrap-server des_kafka:9092 --list >/dev/null 2>&1; then
     echo "Kafka is ready!"
     break
   else
@@ -49,5 +50,5 @@ bash ./scripts/setup_kafka_topics.sh
 echo ""
 echo "Environment setup complete."
 echo "Kafka UI available at: http://localhost:8085"
-echo "Neo4j Browser available at: http://localhost:7476"
+echo "Neo4j Browser available at: http://localhost:7475"
 echo "Spark Master UI available at: http://localhost:8080"

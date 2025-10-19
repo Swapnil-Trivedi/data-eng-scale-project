@@ -49,7 +49,8 @@ This script will:
 ### 3. Stopping the environment
 To stop all services, run:
 ```bash
-docker-compose down
+docker-compose -f ./docker/docker-compose.yaml down -v
+
 ```
 
 ### 4. Purging Kafka Topics
