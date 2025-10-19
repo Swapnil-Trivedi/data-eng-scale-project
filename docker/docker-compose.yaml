@@ -58,25 +58,40 @@ services:
       - des_network
 
   spark-master:
-    container_name: des_spark_master
-    image: apache/spark:4.0.0
-    environment:
-      - SPARK_MASTER_HOST=des_spark_master
+    image: apache/spark:3.5.0
+    container_name: des_spark-master
+    hostname: spark-master
     command: /opt/spark/bin/spark-class org.apache.spark.deploy.master.Master
+    environment:
+      - SPARK_MODE=master
+      - SPARK_MASTER_HOST=spark-master
+      - SPARK_MASTER_PORT=7077
+      - SPARK_MASTER_WEBUI_PORT=8080
     ports:
-      - "8080:8080"
-      - "7077:7077"
+      - '8080:8080' # Master Web UI
+      - '7077:7077' # Master Port
+    volumes:
+      - ./spark-apps:/opt/spark-apps
+      - ./spark-data:/opt/spark-data
     networks:
       - des_network
 
   spark-worker:
-    container_name: des_spark_worker
-    image: apache/spark:4.0.0
+    image: apache/spark:3.5.0
+    container_name: des_spark-worker
+    hostname: spark-worker
+    command: /opt/spark/bin/spark-class org.apache.spark.deploy.worker.Worker spark://spark-master:7077
+    environment:
+      - SPARK_WORKER_CORES=2
+      - SPARK_WORKER_MEMORY=2g
+      - SPARK_WORKER_WEBUI_PORT=8081
+    ports:
+      - '8081:8081' # Worker Web UI
     depends_on:
       - spark-master
-    command: /opt/spark/bin/spark-class org.apache.spark.deploy.worker.Worker spark://des_spark_master:7077
-    ports:
-      - "8081:8081"   # Worker Web UI
+    volumes:
+      - ./spark-apps:/opt/spark-apps
+      - ./spark-data:/opt/spark-data
     networks:
       - des_network
 
