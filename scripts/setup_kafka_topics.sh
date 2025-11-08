@@ -19,6 +19,11 @@ docker exec -i des_kafka kafka-topics \
   --bootstrap-server des_kafka:9092 \
   --partitions 3 --replication-factor 1 || echo "ENRICHED-ENTITY-TOPIC already exists"
 
+docker exec -i des_kafka kafka-topics \
+  --create --topic ENGLISH-ENTITY-TOPIC \
+  --bootstrap-server des_kafka:9092 \
+  --partitions 3 --replication-factor 1 || echo "ENGLISH-ENTITY-TOPIC already exists"
+
 echo "Listing topics..."
 docker exec -i des_kafka kafka-topics --list --bootstrap-server des_kafka:9092
 
