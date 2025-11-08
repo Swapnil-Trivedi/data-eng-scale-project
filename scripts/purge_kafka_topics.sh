@@ -8,7 +8,7 @@ echo "Purging Kafka topics..."
 echo "Waiting for Kafka broker to start..."
 sleep 5
 
-TOPICS=("RAW-ENTITY-TOPIC" "ENRICHED-ENTITY-TOPIC")
+TOPICS=("RAW-ENTITY-TOPIC" "ENRICHED-ENTITY-TOPIC" "ENGLISH-ENTITY-TOPIC")
 
 for topic in "${TOPICS[@]}"; do
   echo "Deleting topic: $topic"
