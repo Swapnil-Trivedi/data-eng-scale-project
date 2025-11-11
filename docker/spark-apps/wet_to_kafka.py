@@ -22,7 +22,7 @@ if not selected_files:
 # --------------------------
 spark = (
     SparkSession.builder
-    .appName("WET English Filter to Kafka (Chunked, Per-File)")
+    .appName("WET English Filter to Kafka")
     .config("spark.jars.packages", "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0")
     .getOrCreate()
 )
@@ -109,7 +109,11 @@ for f in selected_files:
     df_chunks = df.withColumn("value", chunk_udf(col("value")))
     df_final = df_chunks.select(col("key"), explode(col("value")).alias("value"))
 
-    print(f"Writing {df_final.count()} records to Kafka for file: {f}")
+    # Repartition to reduce executor memory pressure
+    df_final = df_final.repartition(4, "key")
+
+    # Safe logging: sample keys
+    print(f"Writing records to Kafka for file: {f}")
     df_final.write \
         .format("kafka") \
         .option("kafka.bootstrap.servers", KAFKA_SERVERS) \
