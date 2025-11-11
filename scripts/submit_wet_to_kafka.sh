@@ -10,7 +10,7 @@ START_INDEX="$1"
 NUM_FILES="$2"
 
 echo "============================================================"
-echo " Submitting Spark job: WET → Kafka"
+echo " Submitting Spark job: WET → Kafka (Interactive Mode)"
 echo "------------------------------------------------------------"
 echo " Start index       : $START_INDEX"
 echo " Num files         : $NUM_FILES"
@@ -28,7 +28,11 @@ DRIVER_MEMORY="2G"
 EXECUTOR_CORES="2"
 MEMORY_OVERHEAD="512M"
 
-# Run the Spark job inside the Docker container
+echo "Launching Spark job interactively"
+
+# -----------------------------
+# Run the Spark job interactively inside the Docker container
+# -----------------------------
 docker exec -it des_spark-master /opt/spark/bin/spark-submit \
   --master spark://spark-master:7077 \
   --deploy-mode client \
@@ -42,5 +46,5 @@ docker exec -it des_spark-master /opt/spark/bin/spark-submit \
   /opt/spark-apps/wet_to_kafka.py "$START_INDEX" "$NUM_FILES"
 
 echo "============================================================"
-echo " Job submitted!"
+echo " Spark job finished."
 echo "============================================================"
