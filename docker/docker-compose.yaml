@@ -26,6 +26,8 @@ services:
       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://des_kafka:9092,PLAINTEXT_HOST://localhost:29092
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+    volumes:
+      - kafka_data:/var/lib/kafka/data
     networks:
       - des_network
 
@@ -72,7 +74,7 @@ services:
       - '7077:7077' # Master Port
     volumes:
       - ./spark-apps:/opt/spark-apps
-      - ./spark-data:/opt/spark-data
+      - ../data:/opt/spark-data/data 
     networks:
       - des_network
 
@@ -91,12 +93,13 @@ services:
       - spark-master
     volumes:
       - ./spark-apps:/opt/spark-apps
-      - ./spark-data:/opt/spark-data
+      - ../data:/opt/spark-data/data 
     networks:
       - des_network
 
 volumes:
   neo4j_data:
+  kafka_data:
 
 networks:
   des_network:
