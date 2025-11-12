@@ -73,6 +73,7 @@ services:
     ports:
       - '8080:8080'   # Master Web UI
       - '7077:7077'   # Master port
+      - '8000:8000'   # Custom Job Metrics port
     volumes:
       - ./spark-apps:/opt/spark-apps
       - ../data:/opt/spark-data/data

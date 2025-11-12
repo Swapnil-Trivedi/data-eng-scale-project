@@ -5,8 +5,19 @@ import sys
 import os
 import time
 import re
-from prometheus_client import Counter
+from prometheus_client import Counter , start_http_server
 
+
+# --------------------------
+# Custom Spark Job Metrics Setup
+# --------------------------
+# Create custom counters and gauges for Spark job metrics
+files_read_counter = Counter("files_read_total", "Total number of files read")
+filtered_records_counter = Counter("filtered_records_total", "Total number of filtered (English) records")
+kafka_records_counter = Counter("kafka_records_total", "Total number of records written to Kafka")
+throughput_gauge = Counter("throughput_records_per_second", "Throughput in records per second")
+
+start_http_server(8000)
 # --------------------------
 # Runtime arguments
 # --------------------------
@@ -30,15 +41,6 @@ spark = (
 )
 sc = spark.sparkContext
 sc.setLogLevel("WARN")
-
-# --------------------------
-# Custom Spark Job Metrics Setup
-# --------------------------
-# Create custom counters and gauges for Spark job metrics
-files_read_counter = Counter("files_read_total", "Total number of files read")
-filtered_records_counter = Counter("filtered_records_total", "Total number of filtered (English) records")
-kafka_records_counter = Counter("kafka_records_total", "Total number of records written to Kafka")
-throughput_gauge = Counter("throughput_records_per_second", "Throughput in records per second")
 
 # --------------------------
 # Parser for WET records
