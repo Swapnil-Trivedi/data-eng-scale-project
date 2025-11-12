@@ -121,7 +121,7 @@ services:
       - GF_SECURITY_ADMIN_USER=admin
       - GF_SECURITY_ADMIN_PASSWORD=admin
     volumes:
-      - ./grafana-data:/var/lib/grafana
+      - ../grafana-data:/var/lib/grafana
     networks:
       - des_network
     depends_on:
