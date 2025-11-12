@@ -108,6 +108,8 @@ TOPIC = "ENGLISH-ENTITY-TOPIC"
 # --------------------------
 start_time = time.time()
 
+total_records_processed = 0  # Track total records processed
+
 for f in selected_files:
     file_path = os.path.join(base_dir, f)
     files_read_counter.inc()  # Increment file read counter
@@ -143,13 +145,15 @@ for f in selected_files:
         .option("topic", TOPIC) \
         .save()
 
+    total_records_processed += filtered_count
+
 end_time = time.time()
 
 # --------------------------
 # Final metrics
 # --------------------------
 total_time = end_time - start_time
-throughput = kafka_records_counter._value.get() / total_time if total_time > 0 else 0
+throughput = total_records_processed / total_time if total_time > 0 else 0
 
 # Set throughput gauge value
 throughput_gauge.set(throughput)
