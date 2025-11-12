@@ -65,16 +65,18 @@ services:
     hostname: spark-master
     command: /opt/spark/bin/spark-class org.apache.spark.deploy.master.Master
     environment:
-      - SPARK_MODE=master
-      - SPARK_MASTER_HOST=spark-master
-      - SPARK_MASTER_PORT=7077
-      - SPARK_MASTER_WEBUI_PORT=8080
+      SPARK_MODE: master
+      SPARK_MASTER_HOST: spark-master
+      SPARK_MASTER_PORT: 7077
+      SPARK_MASTER_WEBUI_PORT: 8080
+      SPARK_METRICS_CONF: /opt/spark/conf/metrics.properties
     ports:
-      - '8080:8080' # Master Web UI
-      - '7077:7077' # Master Port
+      - '8080:8080'   # Master Web UI
+      - '7077:7077'   # Master port
     volumes:
       - ./spark-apps:/opt/spark-apps
-      - ../data:/opt/spark-data/data 
+      - ../data:/opt/spark-data/data
+      - ./spark-metrics/metrics.properties:/opt/spark/conf/metrics.properties
     networks:
       - des_network
 
@@ -84,18 +86,47 @@ services:
     hostname: spark-worker
     command: /opt/spark/bin/spark-class org.apache.spark.deploy.worker.Worker spark://spark-master:7077
     environment:
-      - SPARK_WORKER_CORES=2
-      - SPARK_WORKER_MEMORY=2g
-      - SPARK_WORKER_WEBUI_PORT=8081
+      SPARK_WORKER_CORES: 2
+      SPARK_WORKER_MEMORY: 2g
+      SPARK_WORKER_WEBUI_PORT: 8081
+      SPARK_METRICS_CONF: /opt/spark/conf/metrics.properties
     ports:
-      - '8081:8081' # Worker Web UI
+      - '8081:8081'   # Worker Web UI
     depends_on:
       - spark-master
     volumes:
       - ./spark-apps:/opt/spark-apps
-      - ../data:/opt/spark-data/data 
+      - ../data:/opt/spark-data/data
+      - ./spark-metrics/metrics.properties:/opt/spark/conf/metrics.properties
     networks:
       - des_network
+
+  des_prometheus:
+    image: prom/prometheus:latest
+    container_name: des_prometheus
+    volumes:
+      - ../prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+    networks:
+      - des_network
+    restart: always
+
+  des_grafana:
+    image: grafana/grafana:latest
+    container_name: des_grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - ./grafana-data:/var/lib/grafana
+    networks:
+      - des_network
+    depends_on:
+      - des_prometheus
+    restart: always
 
 volumes:
   neo4j_data:
