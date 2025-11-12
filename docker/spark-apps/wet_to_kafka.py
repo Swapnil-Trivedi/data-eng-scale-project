@@ -1,11 +1,11 @@
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, udf, explode
+from pyspark.sql.functions import col, udf , explode
 from pyspark.sql.types import StringType, ArrayType
 import sys
-import re
 import os
 import time
-from prometheus_client import start_http_server, Counter, Gauge
+import re
+from prometheus_client import Counter
 
 # --------------------------
 # Runtime arguments
@@ -32,16 +32,13 @@ sc = spark.sparkContext
 sc.setLogLevel("WARN")
 
 # --------------------------
-# Prometheus Metrics Setup
+# Custom Spark Job Metrics Setup
 # --------------------------
-# Define Prometheus metrics
+# Create custom counters and gauges for Spark job metrics
 files_read_counter = Counter("files_read_total", "Total number of files read")
 filtered_records_counter = Counter("filtered_records_total", "Total number of filtered (English) records")
 kafka_records_counter = Counter("kafka_records_total", "Total number of records written to Kafka")
-throughput_gauge = Gauge("throughput_records_per_second", "Throughput in records per second")
-
-# Start Prometheus server to expose metrics
-start_http_server(8000)  # Exposes metrics on port 8000
+throughput_gauge = Counter("throughput_records_per_second", "Throughput in records per second")
 
 # --------------------------
 # Parser for WET records
@@ -108,8 +105,6 @@ TOPIC = "ENGLISH-ENTITY-TOPIC"
 # --------------------------
 start_time = time.time()
 
-total_records_processed = 0  # Track total records processed
-
 for f in selected_files:
     file_path = os.path.join(base_dir, f)
     files_read_counter.inc()  # Increment file read counter
@@ -145,18 +140,16 @@ for f in selected_files:
         .option("topic", TOPIC) \
         .save()
 
-    total_records_processed += filtered_count
-
 end_time = time.time()
 
 # --------------------------
 # Final metrics
 # --------------------------
 total_time = end_time - start_time
-throughput = total_records_processed / total_time if total_time > 0 else 0
+throughput = kafka_records_counter._value.get() / total_time if total_time > 0 else 0
 
 # Set throughput gauge value
-throughput_gauge.set(throughput)
+throughput_gauge.inc(throughput)
 
 # Print out the collected metrics
 print(f"Metrics:")
@@ -164,5 +157,3 @@ print(f"Total files read: {files_read_counter._value.get()}")
 print(f"Total filtered records: {filtered_records_counter._value.get()}")
 print(f"Total records inserted into Kafka: {kafka_records_counter._value.get()}")
 print(f"Throughput (records per second): {throughput:.2f}")
-
-spark.stop()
