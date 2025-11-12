@@ -4,6 +4,8 @@ from pyspark.sql.types import StringType, ArrayType
 import sys
 import re
 import os
+import time
+from prometheus_client import start_http_server, Counter, Gauge
 
 # --------------------------
 # Runtime arguments
@@ -28,6 +30,18 @@ spark = (
 )
 sc = spark.sparkContext
 sc.setLogLevel("WARN")
+
+# --------------------------
+# Prometheus Metrics Setup
+# --------------------------
+# Define Prometheus metrics
+files_read_counter = Counter("files_read_total", "Total number of files read")
+filtered_records_counter = Counter("filtered_records_total", "Total number of filtered (English) records")
+kafka_records_counter = Counter("kafka_records_total", "Total number of records written to Kafka")
+throughput_gauge = Gauge("throughput_records_per_second", "Throughput in records per second")
+
+# Start Prometheus server to expose metrics
+start_http_server(8000)  # Exposes metrics on port 8000
 
 # --------------------------
 # Parser for WET records
@@ -92,14 +106,21 @@ TOPIC = "ENGLISH-ENTITY-TOPIC"
 # --------------------------
 # Process files one by one
 # --------------------------
+start_time = time.time()
+
 for f in selected_files:
     file_path = os.path.join(base_dir, f)
+    files_read_counter.inc()  # Increment file read counter
     print(f"Reading file: {file_path}")
 
     rdd = sc.wholeTextFiles(file_path).flatMap(lambda x: parse_wet_records(x[1]))
     rdd_filtered = rdd.filter(lambda x: is_english(x[1])) \
                        .map(lambda x: (x[0], normalize_text(x[2]))) \
                        .filter(lambda x: x[1] != "")
+
+    # Count filtered records
+    filtered_count = rdd_filtered.count()
+    filtered_records_counter.inc(filtered_count)
 
     if rdd_filtered.isEmpty():
         print(f"No English content found in {f}, skipping.")
@@ -112,12 +133,32 @@ for f in selected_files:
     # Repartition to reduce executor memory pressure
     df_final = df_final.repartition(4, "key")
 
-    # Safe logging: sample keys
-    print(f"Writing records to Kafka for file: {f}")
+    # Kafka write
+    print(f"Writing {filtered_count} records to Kafka for file: {f}")
+    kafka_records_counter.inc(filtered_count)  # Increment Kafka record counter
+
     df_final.write \
         .format("kafka") \
         .option("kafka.bootstrap.servers", KAFKA_SERVERS) \
         .option("topic", TOPIC) \
         .save()
+
+end_time = time.time()
+
+# --------------------------
+# Final metrics
+# --------------------------
+total_time = end_time - start_time
+throughput = kafka_records_counter._value.get() / total_time if total_time > 0 else 0
+
+# Set throughput gauge value
+throughput_gauge.set(throughput)
+
+# Print out the collected metrics
+print(f"Metrics:")
+print(f"Total files read: {files_read_counter._value.get()}")
+print(f"Total filtered records: {filtered_records_counter._value.get()}")
+print(f"Total records inserted into Kafka: {kafka_records_counter._value.get()}")
+print(f"Throughput (records per second): {throughput:.2f}")
 
 spark.stop()

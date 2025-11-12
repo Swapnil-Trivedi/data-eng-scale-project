@@ -28,6 +28,27 @@ DRIVER_MEMORY="2G"
 EXECUTOR_CORES="2"
 MEMORY_OVERHEAD="512M"
 
+echo "Installing Python 3, pip, and Prometheus client on the Spark master container"
+
+# -----------------------------
+# Install Python, pip, and prometheus_client in Spark master container
+# -----------------------------
+docker exec -u root -it des_spark-master bash -c "
+  # Install Python 3 and pip
+  apt-get update && apt-get install -y python3 python3-pip
+
+  # Install Prometheus client
+  pip3 install prometheus_client
+"
+
+# Check installation success
+if docker exec des_spark-master python3 -c "import prometheus_client" &>/dev/null; then
+  echo "prometheus_client installed successfully!"
+else
+  echo "Failed to install prometheus_client. Exiting."
+  exit 1
+fi
+
 echo "Launching Spark job interactively"
 
 # -----------------------------
