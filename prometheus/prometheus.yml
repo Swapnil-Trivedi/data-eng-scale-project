@@ -10,11 +10,13 @@ scrape_configs:
 
   # Spark Master metrics
   - job_name: 'spark-master'
+    metrics_path: '/metrics'
     static_configs:
       - targets: ['spark-master:8080']
 
   # Spark Worker metrics
   - job_name: 'spark-worker'
+    metrics_path: '/metrics'
     static_configs:
       - targets: ['spark-worker:8081']
 
