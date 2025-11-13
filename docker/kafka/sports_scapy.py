@@ -56,10 +56,10 @@ def produce_to_sports_topic(url, text_value):
         'timestamp': timestamp
     }
 
-    producer.produce('SPORTS-ENTITY-TOPIC', value=json.dumps(message))
+    producer.produce('SPORTS-ENTITY-TOPIC', key=url, value=json.dumps(message))
     producer.flush()  # Ensure the message is sent
 
-    print(f"Produced sports-related content to SPORTS-ENTITY-TOPIC.")
+    print(f"Produced sports-related content to SPORTS-ENTITY-TOPIC with URL: {url}")
 
 # Main loop: consume messages
 try:
