@@ -10,60 +10,35 @@ START_INDEX="$1"
 NUM_FILES="$2"
 
 echo "============================================================"
-echo " Submitting Spark job: WET → Kafka (Interactive Mode)"
+echo " Submitting Spark job in Single-Node Local Mode"
 echo "------------------------------------------------------------"
-echo " Start index       : $START_INDEX"
-echo " Num files         : $NUM_FILES"
-echo " Target container  : des_spark-master"
-echo " Timestamp         : $(date '+%Y-%m-%d %H:%M:%S')"
+echo " Start index : $START_INDEX"
+echo " Num files   : $NUM_FILES"
+echo " Container   : des_spark-master"
+echo " Timestamp   : $(date '+%Y-%m-%d %H:%M:%S')"
 echo "============================================================"
 
-# Make sure temporary Ivy cache exists
-TMP_IVY_CACHE="/tmp/.ivy2"
-mkdir -p "$TMP_IVY_CACHE"
-
-# Set memory and cores
-EXECUTOR_MEMORY="2G"
-DRIVER_MEMORY="2G"
-EXECUTOR_CORES="2"
-MEMORY_OVERHEAD="512M"
-
-echo "Installing Python 3, pip, and Prometheus client on the Spark master container"
+# -----------------------------
+# Ensure Python and Prometheus client are installed in the container
+# -----------------------------
+# docker exec -u root des_spark-master bash -c "
+#   apt-get update && \
+#   apt-get install -y python3 python3-pip && \
+#   pip3 install --no-cache-dir prometheus_client
+# "
 
 # -----------------------------
-# Install Python, pip, and prometheus_client in Spark master container
-# -----------------------------
-docker exec -u root -it des_spark-master bash -c "
-  # Install Python 3 and pip
-  apt-get update && apt-get install -y python3 python3-pip
-
-  # Install Prometheus client
-  pip3 install prometheus_client
-"
-
-# Check installation success
-if docker exec des_spark-master python3 -c "import prometheus_client" &>/dev/null; then
-  echo "prometheus_client installed successfully!"
-else
-  echo "Failed to install prometheus_client. Exiting."
-  exit 1
-fi
-
-echo "Launching Spark job interactively"
-
-# -----------------------------
-# Run the Spark job interactively inside the Docker container
+# Run Spark job in local mode
 # -----------------------------
 docker exec -it des_spark-master /opt/spark/bin/spark-submit \
-  --master spark://spark-master:7077 \
+  --master local[*] \
   --deploy-mode client \
   --name "wet_to_kafka_${START_INDEX}_${NUM_FILES}" \
-  --conf spark.jars.ivy="$TMP_IVY_CACHE" \
   --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0 \
-  --executor-memory $EXECUTOR_MEMORY \
-  --driver-memory $DRIVER_MEMORY \
-  --executor-cores $EXECUTOR_CORES \
-  --conf spark.executor.memoryOverhead=$MEMORY_OVERHEAD \
+  --driver-memory 2G \
+  --executor-memory 2G \
+  --executor-cores 2 \
+  --conf spark.executor.memoryOverhead=512M \
   /opt/spark-apps/wet_to_kafka.py "$START_INDEX" "$NUM_FILES"
 
 echo "============================================================"
