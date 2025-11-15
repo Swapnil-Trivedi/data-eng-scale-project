@@ -1,53 +1,63 @@
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col, udf , explode
+from pyspark.sql.functions import col, udf, explode
 from pyspark.sql.types import StringType, ArrayType
 import sys
 import os
 import time
 import re
-from prometheus_client import Counter , start_http_server
+from prometheus_client import Counter, Gauge, start_http_server
 
 
-# --------------------------
-# Custom Spark Job Metrics Setup
-# --------------------------
-# Create custom counters and gauges for Spark job metrics
+# ============================================================
+# Prometheus Metrics
+# ============================================================
 files_read_counter = Counter("files_read_total", "Total number of files read")
-filtered_records_counter = Counter("filtered_records_total", "Total number of filtered (English) records")
+filtered_records_counter = Counter("filtered_records_total", "Total number of filtered English records")
 kafka_records_counter = Counter("kafka_records_total", "Total number of records written to Kafka")
-throughput_gauge = Counter("throughput_records_per_second", "Throughput in records per second")
+throughput_gauge = Gauge("throughput_records_per_second", "Records per second processed")
 
-start_http_server(8000)
-# --------------------------
+# IMPORTANT: Bind to 0.0.0.0 so Prometheus can see it
+start_http_server(8000, addr="0.0.0.0")
+
+
+# ============================================================
 # Runtime arguments
-# --------------------------
+# ============================================================
 start_index = int(sys.argv[1]) if len(sys.argv) > 1 else 0
 num_files = int(sys.argv[2]) if len(sys.argv) > 2 else 1
 
 base_dir = "/opt/spark-data/data/289-index-data-extracted"
 all_files = sorted([f for f in os.listdir(base_dir) if f.endswith(".warc.wet")])
 selected_files = all_files[start_index:start_index + num_files]
+
 if not selected_files:
     raise ValueError(f"No files found for range {start_index}:{start_index + num_files}")
 
-# --------------------------
-# Spark setup
-# --------------------------
+
+# ============================================================
+# Spark Setup (Local Mode)
+# ============================================================
 spark = (
     SparkSession.builder
-    .appName("WET English Filter to Kafka")
-    .config("spark.jars.packages", "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0")
-    .getOrCreate()
+        .appName("WET English Filter to Kafka (Local Mode)")
+        .config("spark.jars.packages", "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0")
+        .getOrCreate()
 )
+
 sc = spark.sparkContext
 sc.setLogLevel("WARN")
 
-# --------------------------
-# Parser for WET records
-# --------------------------
-def parse_wet_records(record):
+
+# ============================================================
+# Helpers
+# ============================================================
+def parse_wet_records(record: str):
+    """
+    Parses a WET file into structured (url, lang, content) tuples.
+    """
     records = record.split("WARC/1.0")
     parsed = []
+
     for rec in records:
         rec = rec.strip()
         if not rec:
@@ -66,75 +76,80 @@ def parse_wet_records(record):
 
         if content:
             parsed.append((url, lang, content))
+
     return parsed
 
-# --------------------------
-# Language check for English
-# --------------------------
-def is_english(lang_str):
-    langs = re.split(r"[,\s]+", lang_str.lower())
-    return any(l in ["en", "eng", "english"] for l in langs)
 
-# --------------------------
-# Normalize text
-# --------------------------
-def normalize_text(text):
+def is_english(lang: str) -> bool:
+    langs = re.split(r"[,\s]+", lang.lower())
+    return any(l in ("en", "eng", "english") for l in langs)
+
+
+def normalize_text(text: str) -> str:
     text = text.lower()
     text = re.sub(r"[^a-z0-9\s]", " ", text)
     text = re.sub(r"\s+", " ", text)
     return text.strip()
 
+
 normalize_udf = udf(normalize_text, StringType())
 
-# --------------------------
-# Chunk large messages
-# --------------------------
+
 MAX_CHUNK_SIZE = 512 * 1024  # 512 KB
-def chunk_text(text):
+
+
+def chunk_text(text: str):
     b = text.encode("utf-8")
-    return [b[i:i+MAX_CHUNK_SIZE].decode("utf-8", errors="ignore") for i in range(0, len(b), MAX_CHUNK_SIZE)]
+    return [b[i:i + MAX_CHUNK_SIZE].decode("utf-8", "ignore") for i in range(0, len(b), MAX_CHUNK_SIZE)]
+
 
 chunk_udf = udf(chunk_text, ArrayType(StringType()))
 
-# --------------------------
+
+# ============================================================
 # Kafka config
-# --------------------------
+# ============================================================
 KAFKA_SERVERS = "des_kafka:9092"
 TOPIC = "ENGLISH-ENTITY-TOPIC"
 
-# --------------------------
-# Process files one by one
-# --------------------------
+
+# ============================================================
+# Process selected files
+# ============================================================
 start_time = time.time()
 
-for f in selected_files:
-    file_path = os.path.join(base_dir, f)
-    files_read_counter.inc()  # Increment file read counter
-    print(f"Reading file: {file_path}")
+for filename in selected_files:
+    file_path = os.path.join(base_dir, filename)
+    print(f"Processing file: {file_path}")
+
+    files_read_counter.inc()
 
     rdd = sc.wholeTextFiles(file_path).flatMap(lambda x: parse_wet_records(x[1]))
-    rdd_filtered = rdd.filter(lambda x: is_english(x[1])) \
-                       .map(lambda x: (x[0], normalize_text(x[2]))) \
-                       .filter(lambda x: x[1] != "")
 
-    # Count filtered records
+    # Filter for English + normalized content
+    rdd_filtered = (
+        rdd.filter(lambda x: is_english(x[1]))
+            .map(lambda x: (x[0], normalize_text(x[2])))
+            .filter(lambda x: x[1] != "")
+    )
+
     filtered_count = rdd_filtered.count()
     filtered_records_counter.inc(filtered_count)
 
-    if rdd_filtered.isEmpty():
-        print(f"No English content found in {f}, skipping.")
+    if filtered_count == 0:
+        print(f"No English content found in {filename}, skipping.")
         continue
 
     df = rdd_filtered.toDF(["key", "value"])
+
     df_chunks = df.withColumn("value", chunk_udf(col("value")))
     df_final = df_chunks.select(col("key"), explode(col("value")).alias("value"))
 
-    # Repartition to reduce executor memory pressure
+    # Reduce pressure on local Spark
     df_final = df_final.repartition(4, "key")
 
-    # Kafka write
-    print(f"Writing {filtered_count} records to Kafka for file: {f}")
-    kafka_records_counter.inc(filtered_count)  # Increment Kafka record counter
+    print(f"Writing {filtered_count} records to Kafka...")
+    kafka_records_counter.inc(filtered_count)
 
     df_final.write \
         .format("kafka") \
@@ -144,18 +159,31 @@ for f in selected_files:
 
 end_time = time.time()
 
-# --------------------------
-# Final metrics
-# --------------------------
+
+# ============================================================
+# Final Metrics
+# ============================================================
 total_time = end_time - start_time
-throughput = kafka_records_counter._value.get() / total_time if total_time > 0 else 0
+total_records = kafka_records_counter._value.get()
 
-# Set throughput gauge value
-throughput_gauge.inc(throughput)
+throughput = total_records / total_time if total_time > 0 else 0.0
+throughput_gauge.set(throughput)
 
-# Print out the collected metrics
-print(f"Metrics:")
-print(f"Total files read: {files_read_counter._value.get()}")
-print(f"Total filtered records: {filtered_records_counter._value.get()}")
-print(f"Total records inserted into Kafka: {kafka_records_counter._value.get()}")
-print(f"Throughput (records per second): {throughput:.2f}")
+print("============================================================")
+print("Job Completed")
+print("------------------------------------------------------------")
+print(f"Total files read:              {files_read_counter._value.get()}")
+print(f"Total English records:         {filtered_records_counter._value.get()}")
+print(f"Total Kafka records inserted:  {total_records}")
+print(f"Throughput (records/sec):      {throughput:.2f}")
+print("============================================================")
+
+# ============================================================
+# Wait for user to quit (keeps Spark UI alive)
+# ============================================================
+print("Spark UI will stay alive for monitoring...")
+try:
+    time.sleep(3600)
+except KeyboardInterrupt:
+    print("Exiting...")
+spark.stop()
