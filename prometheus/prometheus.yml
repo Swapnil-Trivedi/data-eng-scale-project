@@ -8,13 +8,21 @@ scrape_configs:
     static_configs:
       - targets: ['localhost:9090']
 
-  # Single-node Spark (master + driver)
-  - job_name: 'spark'
-    metrics_path: '/metrics'
+  - job_name: 'wet_kafka_ingest'
     static_configs:
-      - targets: ['spark-master:8080']   # Spark master metrics
+      - targets: ['host.docker.internal:8000']  # or your host IP if not using Docker
 
-  # Kafka
-  - job_name: 'kafka'
-    static_configs:
-      - targets: ['kafka_jmx_exporter:5556']
+  # # Single-node Spark (master + driver)
+  # - job_name: 'spark'
+  #   metrics_path: '/metrics'
+  #   static_configs:
+  #     - targets: ['spark-master:8080']   # Spark master metrics
+
+  # # Kafka
+  # - job_name: 'kafka'
+  #   static_configs:
+  #     - targets: ['kafka_jmx_exporter:5556']
+    
+
+    
+
