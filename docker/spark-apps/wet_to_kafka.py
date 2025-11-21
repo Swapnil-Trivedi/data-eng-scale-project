@@ -41,6 +41,11 @@ spark = (
     SparkSession.builder
     .appName("WET English Filter to Kafka (Local Mode)")
     .config("spark.jars.packages", "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0")
+    .config("spark.executor.memory", "4g")  # Executor memory: 4 GB
+    .config("spark.driver.memory", "4g")    # Driver memory: 4 GB
+    .config("spark.memory.offHeap.enabled", "true")  # Enable off-heap memory
+    .config("spark.memory.offHeap.size", "2g")       # Off-heap memory: 2 GB
+    .config("spark.master", "local[*]")    # Use all available cores
     .getOrCreate()
 )
 

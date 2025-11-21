@@ -1,0 +1,3 @@
+pandas
+prometheus_client
+pyarrow

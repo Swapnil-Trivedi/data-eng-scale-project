@@ -59,37 +59,37 @@ services:
     networks:
       - des_network
 
-  spark-master:
-    image: apache/spark:3.5.0
-    container_name: des_spark-master
-    hostname: spark-master
-    command: >
-      bash -c "
-      apt-get update && apt-get install -y python3 python3-pip &&
-      pip3 install -r /opt/spark-apps/requirements.txt &&
-      /opt/spark/bin/spark-class org.apache.spark.deploy.master.Master
-      "
-    environment:
-      SPARK_MODE: master
-      SPARK_MASTER_HOST: spark-master
-      SPARK_MASTER_PORT: 7077
-      SPARK_MASTER_WEBUI_PORT: 8080
-      SPARK_METRICS_CONF: /opt/spark/conf/metrics.properties
-      SPARK_WORKER_CORES: 2
-      SPARK_WORKER_MEMORY: 2g
-      SPARK_WORKER_WEBUI_PORT: 8081
-    user: root 
-    ports:
-      - '8080:8080'   # Spark master UI + metrics
-      - '7077:7077'   # Spark master port
-      - '8000:8000'   # Python app Prometheus metrics
-      - '4040:4040'   # Spark driver UI for local mode
-    volumes:
-      - ./spark-apps:/opt/spark-apps
-      - ../data:/opt/spark-data/data
-      - ./spark-metrics/metrics.properties:/opt/spark/conf/metrics.properties
-    networks:
-      - des_network
+  # spark-master:
+  #   image: apache/spark:3.5.0
+  #   container_name: des_spark-master
+  #   hostname: spark-master
+  #   command: >
+  #     bash -c "
+  #     apt-get update && apt-get install -y python3 python3-pip &&
+  #     pip3 install -r /opt/spark-apps/requirements.txt &&
+  #     /opt/spark/bin/spark-class org.apache.spark.deploy.master.Master
+  #     "
+  #   environment:
+  #     SPARK_MODE: master
+  #     SPARK_MASTER_HOST: spark-master
+  #     SPARK_MASTER_PORT: 7077
+  #     SPARK_MASTER_WEBUI_PORT: 8080
+  #     SPARK_METRICS_CONF: /opt/spark/conf/metrics.properties
+  #     SPARK_WORKER_CORES: 2
+  #     SPARK_WORKER_MEMORY: 2g
+  #     SPARK_WORKER_WEBUI_PORT: 8081
+  #   user: root 
+  #   ports:
+  #     - '8080:8080'   # Spark master UI + metrics
+  #     - '7077:7077'   # Spark master port
+  #     - '8000:8000'   # Python app Prometheus metrics
+  #     - '4040:4040'   # Spark driver UI for local mode
+  #   volumes:
+  #     - ./spark-apps:/opt/spark-apps
+  #     - ../data:/opt/spark-data/data
+  #     - ./spark-metrics/metrics.properties:/opt/spark/conf/metrics.properties
+  #   networks:
+  #     - des_network
 
   des_prometheus:
     image: prom/prometheus:latest
