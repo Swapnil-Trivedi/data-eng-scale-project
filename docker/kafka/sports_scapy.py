@@ -1,86 +1,138 @@
-import spacy
-from confluent_kafka import Consumer, KafkaException, Producer
+#!/usr/bin/env python3
 import json
-from datetime import datetime
+import time
+import threading
+from queue import Queue, Empty
+from confluent_kafka import Consumer, Producer, KafkaException
+from prometheus_client import Counter, Gauge, start_http_server
+import spacy
 
-# Load the pre-trained spaCy model
-nlp = spacy.load("en_core_web_sm")
+# ============================================================
+# Prometheus Metrics
+# ============================================================
+messages_consumed_counter = Counter("messages_consumed_total", "Total messages consumed")
+sports_messages_counter = Counter("sports_messages_total", "Total sports messages produced")
+throughput_gauge = Gauge("sports_throughput_msgs_per_sec", "Sports messages processed per second")
 
-# List of sports-related keywords
-sports_keywords = ["basketball", "football", "soccer", "baseball", "tennis", "hockey", "rugby", "cricket", "athletics", "boxing", "swimming", "golf", "mma", "esports"]
+start_http_server(8001, addr="0.0.0.0")  # separate port for consumer metrics
 
-# Kafka Consumer and Producer Configuration
-consumer_conf = {
-    'bootstrap.servers': 'localhost:29092',  # Use the external port of Kafka
+# ============================================================
+# Kafka Config
+# ============================================================
+CONSUMER_CONF = {
+    'bootstrap.servers': 'localhost:29092',
     'group.id': 'sports-consumer-group',
     'auto.offset.reset': 'earliest'
 }
-consumer = Consumer(consumer_conf)
 
-producer_conf = {
-    'bootstrap.servers': 'localhost:29092'  # Use the external port of Kafka
+PRODUCER_CONF = {
+    'bootstrap.servers': 'localhost:29092',
+    'linger.ms': 10,
+    'batch.num.messages': 1000,
+    'compression.type': 'lz4'
 }
-producer = Producer(producer_conf)
 
-consumer.subscribe(['ENGLISH-ENTITY-TOPIC'])
+INPUT_TOPIC = "ENGLISH-ENTITY-TOPIC"
+OUTPUT_TOPIC = "SPORTS-ENTITY-TOPIC"
 
-# Function to check if the text is related to sports using keyword matching and NLP entity extraction
-def classify_as_sports(text):
-    """Check if the text contains sports-related keywords or named entities."""
-    
-    # First, check for sports-related keywords in the text
-    for keyword in sports_keywords:
-        if keyword.lower() in text.lower():
-            return True
-    
-    # If no keyword is found, use spaCy's NER (Named Entity Recognition) to detect sports-related entities
+# ============================================================
+# Sports classification
+# ============================================================
+sports_keywords = set([
+    "basketball", "football", "soccer", "baseball", "tennis",
+    "hockey", "rugby", "cricket", "athletics", "boxing",
+    "swimming", "golf", "mma", "esports"
+])
+
+nlp = spacy.load("en_core_web_sm")
+
+def classify_sports(text):
+    """Return True if text is sports-related."""
+    text_lower = text.lower()
+    if any(keyword in text_lower for keyword in sports_keywords):
+        return True
+
+    # Optional NER fallback (slightly slower)
     doc = nlp(text)
-    
-    # Look for sports-related entities like teams, players, events
+    sports_entities = ["team", "player", "match", "tournament", "league", "competition"]
     for ent in doc.ents:
         if ent.label_ in ["ORG", "PERSON", "EVENT"]:
-            # Filter for likely sports-related entities based on common sports entities
-            sports_related_entities = ["team", "player", "match", "tournament", "league", "competition"]
-            if any(entity in ent.text.lower() for entity in sports_related_entities):
+            if any(se in ent.text.lower() for se in sports_entities):
                 return True
-    
-    # If no match is found, return False
     return False
 
-def produce_to_sports_topic(url, text_value):
-    """Produce the sports-related content to the SPORTS-ENTITY-TOPIC."""
-    timestamp = datetime.utcnow().isoformat() + "Z"
-    message = {
-        'url': url,
-        'text_value': text_value,  # Full original text content
-        'timestamp': timestamp
-    }
+# ============================================================
+# Kafka producer worker
+# ============================================================
+message_queue = Queue(maxsize=5000)
+stop_event = threading.Event()
+producer = Producer(PRODUCER_CONF)
 
-    producer.produce('SPORTS-ENTITY-TOPIC', key=url, value=json.dumps(message))
-    producer.flush()  # Ensure the message is sent
-
-    print(f"Produced sports-related content to SPORTS-ENTITY-TOPIC with URL: {url}")
-
-# Main loop: consume messages
-try:
-    while True:
-        msg = consumer.poll(1.0)
-
-        if msg is None:  # No message available within the timeout
+def producer_worker():
+    while not stop_event.is_set() or not message_queue.empty():
+        try:
+            key, value = message_queue.get(timeout=1)
+        except Empty:
             continue
-        if msg.error():  # Handle Kafka errors
-            raise KafkaException(msg.error())
+        msg = json.dumps({
+            "url": key,
+            "text_value": value,
+            "timestamp": time.time()
+        })
+        producer.produce(OUTPUT_TOPIC, key=key, value=msg)
+        sports_messages_counter.inc()
+        print(f"[Producer] Sent sports message for URL: {key}")
+    producer.flush()
 
-        key = msg.key().decode('utf-8')  # URL (key)
-        value = msg.value().decode('utf-8')  # Normalized text content (value)
+# ============================================================
+# Consumer loop
+# ============================================================
+def consumer_loop():
+    consumer = Consumer(CONSUMER_CONF)
+    consumer.subscribe([INPUT_TOPIC])
+    try:
+        while True:
+            msg = consumer.poll(1.0)
+            if msg is None:
+                continue
+            if msg.error():
+                raise KafkaException(msg.error())
 
-        print(f"Consumed message from {key}")
+            key = msg.key().decode("utf-8")
+            value = msg.value().decode("utf-8")
 
-        # Classify the content as sports-related
-        if classify_as_sports(value):
-            produce_to_sports_topic(key, value)  # Produce to new topic
-        else:
-            print("Content is not related to sports. Skipping...")
+            messages_consumed_counter.inc()
+            print(f"[Consumer] Consumed message: {key}")
 
-finally:
-    consumer.close()
+            if classify_sports(value):
+                message_queue.put((key, value))
+            else:
+                print(f"[Consumer] Skipped non-sports content: {key}")
+
+    finally:
+        consumer.close()
+        stop_event.set()
+
+# ============================================================
+# Main
+# ============================================================
+def main():
+    t_producer = threading.Thread(target=producer_worker, daemon=True)
+    t_producer.start()
+
+    start_time = time.time()
+    try:
+        consumer_loop()
+    except KeyboardInterrupt:
+        print("Shutting down consumer...")
+    finally:
+        stop_event.set()
+        t_producer.join()
+        elapsed = time.time() - start_time
+        throughput = sports_messages_counter._value.get() / elapsed
+        throughput_gauge.set(throughput)
+        print(f"Total sports messages sent: {sports_messages_counter._value.get()}")
+        print(f"Throughput: {throughput:.2f} msgs/sec")
+
+if __name__ == "__main__":
+    main()
