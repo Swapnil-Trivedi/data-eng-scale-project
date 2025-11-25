@@ -6,16 +6,8 @@ import time
 import threading
 import logging
 from logging.handlers import RotatingFileHandler
-
 from confluent_kafka import Producer
 from prometheus_client import Counter, Gauge, Histogram, start_http_server
-
-import trafilatura
-from langdetect import detect, DetectorFactory
-
-# ============================================================
-# Fix langdetect randomness
-DetectorFactory.seed = 0
 
 # ============================================================
 # Prometheus Metrics
@@ -38,6 +30,7 @@ per_file_chunks_total = Counter("per_file_chunks_total", "Chunks produced per fi
 threads_active = Gauge("threads_active", "Number of active ingestion threads")
 throughput_gauge = Gauge("throughput_records_per_second", "Records per second processed")
 
+# Start Prometheus metrics server
 start_http_server(8000, addr="0.0.0.0")
 
 # ============================================================
@@ -47,7 +40,6 @@ BASE_DIR = "../data/289-index-data-extracted"
 KAFKA_BOOTSTRAP = "localhost:29092"
 TOPIC = "ENGLISH-ENTITY-TOPIC"
 MAX_CHUNK_SIZE = 512 * 1024  # 512 KB
-MAX_THREADS = 4               # parallel threads
 
 # Logging for keys
 LOG_DIR = "./ingest_logs"
@@ -62,15 +54,40 @@ handler.setFormatter(formatter)
 key_logger.addHandler(handler)
 
 # ============================================================
-# Kafka producer
+# Helpers
 # ============================================================
+def is_english(lang: str) -> bool:
+    langs = re.split(r"[,\s]+", lang.lower())
+    return any(l in ("en", "eng", "english") for l in langs)
 
+def normalize(text: str) -> str:
+    text = re.sub(r"[^a-z0-9\s]", " ", text.lower())
+    return re.sub(r"\s+", " ", text).strip()
+
+def parse_wet(content: str):
+    for rec in content.split("WARC/1.0"):
+        rec = rec.strip()
+        if not rec:
+            continue
+        uri = re.search(r"WARC-Target-URI:\s*(\S+)", rec)
+        lang = re.search(r"WARC-Identified-Content-Language:\s*([\w,-]+)", rec)
+        body = re.split(r"\r?\n\r?\n", rec, maxsplit=1)
+        if not uri or not lang or len(body) < 2:
+            continue
+        yield uri.group(1), lang.group(1), body[1].strip()
+
+def chunk_text(text: str):
+    b = text.encode("utf-8")
+    for i in range(0, len(b), MAX_CHUNK_SIZE):
+        yield b[i:i + MAX_CHUNK_SIZE].decode("utf-8", "ignore")
+
+# ============================================================
+# Kafka Producer (shared)
+# ============================================================
 producer = Producer({
     "bootstrap.servers": KAFKA_BOOTSTRAP,
     "linger.ms": 10,
     "batch.num.messages": 10000,
-    "queue.buffering.max.messages": 500000,
-    "queue.buffering.max.kbytes": 1048576,   # 1 GB
     "compression.type": "lz4",
 })
 
@@ -84,118 +101,48 @@ def produce_with_metrics(key, value, file_name):
             kafka_records_counter.inc()
             kafka_batch_size.observe(size)
             per_file_chunks_total.labels(file=file_name).inc()
-        except BufferError:
-            producer.flush()
-            producer.produce(TOPIC, key=key, value=value)
+        except Exception as e:
+            kafka_send_errors.inc()
+            print(f"[Kafka ERROR] {key} -> {e}")
 
     send()
-    producer.poll(0)  # clear producer queue
 
 # ============================================================
-# Helpers
+# Worker Thread
 # ============================================================
-
-def is_english_header(lang: str) -> bool:
-    """
-    Return True if the WARC-Identified-Content-Language header indicates English.
-    Accepts 'en', 'eng', 'english' (case-insensitive)
-    """
-    if not lang:
-        return False
-    langs = [l.strip().lower() for l in lang.split(",")]
-    return any(l in ("en", "eng", "english") for l in langs)
-
-def is_english_text(text: str) -> bool:
-    """Use langdetect to confirm content is English."""
-    if not text.strip() or len(text.strip()) < 50:
-        return False
-    try:
-        return detect(text) == "en"
-    except:
-        return False
-
-def read_wet_records(f):
-    """Yield each WARC/1.0 record as string."""
-    rec_lines = []
-    for line in f:
-        if line.startswith("WARC/1.0"):
-            if rec_lines:
-                yield "\n".join(rec_lines)
-            rec_lines = [line.strip()]
-        else:
-            rec_lines.append(line.strip())
-    if rec_lines:
-        yield "\n".join(rec_lines)
-
-def parse_wet(record: str):
-    uri = re.search(r"WARC-Target-URI:\s*(\S+)", record)
-    lang = re.search(r"WARC-Identified-Content-Language:\s*([\w,-]+)", record)
-    body = re.split(r"\r?\n\r?\n", record, maxsplit=1)
-    if not uri or not lang or len(body) < 2:
-        return None
-    return uri.group(1), lang.group(1), body[1].strip()
-
-def chunk_text(text: str):
-    b = text.encode("utf-8")
-    for i in range(0, len(b), MAX_CHUNK_SIZE):
-        yield b[i:i + MAX_CHUNK_SIZE].decode("utf-8", "ignore")
-
-def clean_text(raw):
-    """Extract main text and clean HTML garbage."""
-    text = trafilatura.extract(raw, include_comments=False, include_tables=False, no_fallback=True)
-    if not text:
-        text = raw
-    text = re.sub(r"\s+", " ", text)
-    return text.strip()
-
-# ============================================================
-# Worker thread
-# ============================================================
-
 def process_file(path: str):
     fname = os.path.basename(path)
     print(f"[Thread] Starting: {fname}")
     threads_active.inc()
-    count = 0
 
     try:
         with open(path, "r", encoding="utf-8", errors="ignore") as f:
-            for raw_rec in read_wet_records(f):
-                parsed = parse_wet(raw_rec)
-                if not parsed:
-                    continue
-                url, lang, body = parsed
-
-                # Strict English header check
-                if not is_english_header(lang):
-                    continue
-
-                # Clean HTML/text
-                text = clean_text(body)
-                if not text:
-                    continue
-
-                # Confirm content is English
-                if not is_english_text(text):
-                    continue
-
-                key_logger.info(url)
-                for chunk in chunk_text(text):
-                    produce_with_metrics(url, chunk, fname)
-                    count += 1
-
+            content = f.read()
     except Exception as e:
         print(f"[Thread] ERROR reading file {fname}: {e}")
+        threads_active.dec()
+        return
+
+    count_chunks = 0
+    for url, lang, body in parse_wet(content):
+        if not is_english(lang):
+            continue
+        text = normalize(body)
+        if not text:
+            continue
+        for chunk in chunk_text(text):
+            key_logger.info(url)        # log key
+            produce_with_metrics(url, chunk, fname)
+            count_chunks += 1
 
     producer.flush()
+    filtered_records_counter.inc(count_chunks)
     threads_active.dec()
-    filtered_records_counter.inc(count)
-    print(f"[Thread] Finished {fname}, sent {count} chunks")
+    print(f"[Thread] Finished {fname}, sent {count_chunks} chunks to Kafka")
 
 # ============================================================
 # Main
 # ============================================================
-
 def main(start_index: int, num_files: int):
     all_files = sorted([f for f in os.listdir(BASE_DIR) if f.endswith(".warc.wet")])
     selected = all_files[start_index:start_index + num_files]
@@ -205,28 +152,24 @@ def main(start_index: int, num_files: int):
 
     files_read_counter.inc(len(selected))
     print("============================================================")
-    print(f"Processing {len(selected)} files (max {MAX_THREADS} threads):")
+    print(f"Processing {len(selected)} files (thread per file):")
     for f in selected:
         print(f" - {f}")
     print("============================================================")
 
     t0 = time.time()
     threads = []
-    for i, filename in enumerate(selected):
+    for filename in selected:
         path = os.path.join(BASE_DIR, filename)
         t = threading.Thread(target=process_file, args=(path,))
         t.start()
         threads.append(t)
-        if len(threads) >= MAX_THREADS:
-            for tt in threads:
-                tt.join()
-            threads = []
 
     for t in threads:
         t.join()
 
     elapsed = time.time() - t0
-    rate = kafka_records_counter._value.get() / max(elapsed, 1)
+    rate = kafka_records_counter._value.get() / elapsed
     throughput_gauge.set(rate)
 
     print("============================================================")
@@ -239,9 +182,8 @@ def main(start_index: int, num_files: int):
 # ============================================================
 # CLI
 # ============================================================
-
 if __name__ == "__main__":
     if len(sys.argv) < 3:
-        print("Usage: python3 wet_to_kafka_clean.py <start_index> <num_files>")
+        print("Usage: python3 kafka_wet_ingest.py <start_index> <num_files>")
         sys.exit(1)
     main(int(sys.argv[1]), int(sys.argv[2]))

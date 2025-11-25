@@ -9,10 +9,10 @@ sleep 10
 
 echo "Creating Kafka topics..."
 
-docker exec -i des_kafka kafka-topics \
-  --create --topic SPORTS-ENTITY-TOPIC \
-  --bootstrap-server des_kafka:9092 \
-  --partitions 3 --replication-factor 1 || echo "SPORTS-ENTITY-TOPIC already exists"
+# docker exec -i des_kafka kafka-topics \
+#   --create --topic SPORTS-ENTITY-TOPIC \
+#   --bootstrap-server des_kafka:9092 \
+#   --partitions 3 --replication-factor 1 || echo "SPORTS-ENTITY-TOPIC already exists"
 
 docker exec -i des_kafka kafka-topics \
   --create --topic ENRICHED-ENTITY-TOPIC \
