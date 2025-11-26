@@ -12,7 +12,7 @@ BATCH_SIZE = 50
 BATCH_TIMEOUT = 2.0
 
 # Neo4j configuration
-NEO_URI = "bolt://localhost:7687"
+NEO_URI = "bolt://localhost:7688"
 NEO_USER = None
 NEO_PASSWORD = None
 
