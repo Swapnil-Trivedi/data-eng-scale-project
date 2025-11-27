@@ -32,7 +32,7 @@ consumer.subscribe([KAFKA_TOPIC])
 def upsert_entities(tx, records):
     """
     Upsert URL and Entity nodes with relationships
-    Only ORG, PERSON, LOCATION entities are considered
+    Consider PERSON and GPE entities.
     """
     for rec in records:
         url = rec.get("url")
@@ -43,23 +43,29 @@ def upsert_entities(tx, records):
 
         for ent in entities:
             ent_type = ent.get("label")
-            if ent_type not in ("ORG", "PERSON", "LOCATION"):
+            name = ent.get("text")
+
+            # Only PERSON and GPE
+            if ent_type not in ("PERSON", "GPE"):
                 continue
 
             # Upsert Entity node
             tx.run(
                 "MERGE (e:Entity {name: $name, type: $type})",
-                name=ent["text"],
+                name=name,
                 type=ent_type
             )
 
             # Create relationship: URL -> Entity
             tx.run(
-                "MATCH (u:URL {url: $url}), (e:Entity {name: $name}) "
-                "MERGE (u)-[:MENTIONS]->(e)",
+                """
+                MATCH (u:URL {url: $url}), (e:Entity {name: $name})
+                MERGE (u)-[:MENTIONS]->(e)
+                """,
                 url=url,
-                name=ent["text"]
+                name=name
             )
+
 
 batch = []
 last_flush = time.time()
